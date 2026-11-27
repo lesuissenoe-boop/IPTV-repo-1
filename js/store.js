@@ -32,6 +32,49 @@ export const settings = {
   set apiKey(v) { write('apiKey', v.trim()); emit('settings'); },
   get region() { return read('region', 'FR'); },
   set region(v) { write('region', v); emit('settings'); },
+  // Plateformes auxquelles l'utilisateur est abonné (identifiants TMDB).
+  get subscriptions() { return read('subscriptions', []); },
+  set subscriptions(v) { write('subscriptions', v); emit('settings'); },
+};
+
+// ---- Suivi des séries ------------------------------------------------------
+// Une entrée par série suivie :
+// { id, title, poster, backdrop, seasons: [{ n, count }], last: { s, e } | null,
+//   next: { s, e, date } | null, status, watched: ['1-1', '1-2', …], updatedAt }
+export const tracking = {
+  all() {
+    return read('tracking', {});
+  },
+  get(id) {
+    return this.all()[id] || null;
+  },
+  save(entry) {
+    const all = this.all();
+    all[entry.id] = { ...entry, updatedAt: Date.now() };
+    write('tracking', all);
+    emit('tracking');
+  },
+  remove(id) {
+    const all = this.all();
+    delete all[id];
+    write('tracking', all);
+    emit('tracking');
+  },
+  /** Met à jour les infos de diffusion (sans toucher aux épisodes vus ni à la date d'activité). */
+  refreshMeta(meta) {
+    const all = this.all();
+    const cur = all[meta.id];
+    if (!cur) return;
+    all[meta.id] = { ...cur, ...meta, watched: cur.watched, updatedAt: cur.updatedAt };
+    write('tracking', all);
+  },
+  /** Coche / décoche des épisodes. Crée le suivi si besoin. */
+  setWatched(meta, keys, watched) {
+    const cur = this.get(meta.id) || { ...meta, watched: [] };
+    const set = new Set(cur.watched);
+    keys.forEach((k) => (watched ? set.add(k) : set.delete(k)));
+    this.save({ ...cur, ...meta, watched: [...set] });
+  },
 };
 
 // ---- Watchlist -------------------------------------------------------------

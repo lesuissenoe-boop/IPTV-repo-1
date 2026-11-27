@@ -3,8 +3,11 @@
 Application web façon Apple (iPhone d'abord) qui réunit :
 
 - **Un catalogue global** des films et séries de Netflix, Prime Video, Disney+, Apple TV+, Canal+, Max, Paramount+… (données TMDB / JustWatch), avec la plateforme où chaque titre est disponible en France. Le bouton « Regarder » ouvre l'application officielle.
+- **Le gratuit mis en avant** : rangée « À regarder gratuitement », filtre Gratuit (france.tv, Arte, TF1+, Pluto TV…), étiquette « Gratuit sur… » dans les fiches.
+- **Mes abonnements** : on coche ses plateformes, l'appli indique ce qui est inclus, ce qui demande un abonnement et ce qui est payant ; filtre « Je peux regarder ».
 - **La recherche** par titre, type, plateforme et genre.
-- **Ma liste** (watchlist) avec « À voir » / « Déjà vus ».
+- **Ma liste** (watchlist) avec « À voir » / « Séries » / « Déjà vus ».
+- **Le suivi des séries** : épisodes à cocher par saison, progression, « À suivre » (prochain épisode), date du prochain épisode diffusé.
 - **La TV en direct** : lecteur IPTV pour listes M3U (chaînes gratuites iptv-org par défaut, ou vos propres listes), favoris et zapping.
 
 > Écran ne diffuse aucun contenu des plateformes de streaming. Utilisez uniquement des listes IPTV que vous avez le droit de regarder.
@@ -36,7 +39,8 @@ python3 -m http.server 8000
 | `js/app.js` | Navigation, Accueil, Recherche, Fiche, Ma liste, Réglages |
 | `js/tmdb.js` | Accès au catalogue TMDB |
 | `js/live.js` | TV en direct : lecture M3U et lecteur HLS |
-| `js/store.js` | Sauvegarde locale (clé, watchlist, favoris) |
+| `js/series.js` | Calculs du suivi de séries (progression, prochain épisode) |
+| `js/store.js` | Sauvegarde locale (clé, watchlist, abonnements, séries suivies, favoris) |
 | `js/ui.js` | Icônes, feuilles modales, notifications |
 
 Ce produit utilise l'API TMDB mais n'est ni approuvé ni certifié par TMDB.

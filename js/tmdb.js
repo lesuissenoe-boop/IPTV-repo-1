@@ -18,6 +18,14 @@ export const PROVIDERS = [
 ];
 const PROVIDER_ALIASES = { 9: 119, 10: 119, 2: 350, 1796: 8 }; // variantes (Amazon, Apple iTunes, Netflix avec pub…)
 
+/** Identifiant « principal » d'une plateforme (regroupe les variantes). */
+export const mainProviderId = (id) => PROVIDER_ALIASES[id] || id;
+
+/** Vrai si l'utilisateur est abonné à cette plateforme. */
+export function isSubscribed(providerId, subs = settings.subscriptions) {
+  return subs.includes(mainProviderId(providerId));
+}
+
 export function providerLink(providerId, title, fallback) {
   const p = PROVIDERS.find((x) => x.id === (PROVIDER_ALIASES[providerId] || providerId));
   return p?.search ? p.search(encodeURIComponent(title)) : fallback;
@@ -102,11 +110,26 @@ export const tmdb = {
   },
 
   /** type : 'movie' | 'tv' | 'all' */
-  async discover(type, { providers = [], genre, page = 1, sort = 'popularity.desc', minVotes } = {}) {
+  /**
+   * access : undefined | 'free' (gratuit, avec ou sans pub) | 'mine' (gratuit + mes abonnements)
+   */
+  async discover(type, { providers = [], genre, page = 1, sort = 'popularity.desc', minVotes, access } = {}) {
+    if (access === 'mine') {
+      const subs = settings.subscriptions;
+      if (!subs.length) return this.discover(type, { genre, page, sort, minVotes, access: 'free' });
+      const [free, paid] = await Promise.all([
+        this.discover(type, { genre, page, sort, minVotes, access: 'free' }),
+        this.discover(type, { providers: subs, genre, page, sort, minVotes }),
+      ]);
+      const seen = new Set();
+      const results = interleave(paid.results, free.results)
+        .filter((i) => (seen.has(i.type + i.id) ? false : seen.add(i.type + i.id)));
+      return { results, totalPages: Math.max(free.totalPages, paid.totalPages) };
+    }
     if (type === 'all') {
       const [m, t] = await Promise.all([
-        this.discover('movie', { providers, genre, page, sort, minVotes }),
-        this.discover('tv', { providers, genre: mapGenreToTv(genre), page, sort, minVotes }),
+        this.discover('movie', { providers, genre, page, sort, minVotes, access }),
+        this.discover('tv', { providers, genre: mapGenreToTv(genre), page, sort, minVotes, access }),
       ]);
       return { results: interleave(m.results, t.results), totalPages: Math.max(m.totalPages, t.totalPages) };
     }
@@ -115,6 +138,9 @@ export const tmdb = {
       params.with_watch_providers = providers.join('|');
       params.watch_region = settings.region;
       params.with_watch_monetization_types = 'flatrate|free|ads';
+    } else if (access === 'free') {
+      params.with_watch_monetization_types = 'free|ads';
+      params.watch_region = settings.region;
     }
     const d = await api(`/discover/${type}`, params);
     return { results: d.results.map((r) => normalize(r, type)), totalPages: d.total_pages };
@@ -146,14 +172,42 @@ export const tmdb = {
       cast: (d.credits?.cast || []).slice(0, 15).map((c) => ({ name: c.name, role: c.character, photo: c.profile_path })),
       director: (d.credits?.crew || []).find((c) => c.job === 'Director')?.name || d.created_by?.[0]?.name || '',
       trailer: trailer ? trailer.key : null,
+      // Séries : infos de diffusion pour le suivi des épisodes
+      tvMeta: type === 'tv' ? {
+        id: d.id,
+        title: d.name,
+        poster: d.poster_path,
+        backdrop: d.backdrop_path,
+        status: d.status,
+        seasons: (d.seasons || []).filter((x) => x.season_number > 0 && x.episode_count > 0)
+          .map((x) => ({ n: x.season_number, count: x.episode_count, name: x.name })),
+        last: d.last_episode_to_air ? { s: d.last_episode_to_air.season_number, e: d.last_episode_to_air.episode_number } : null,
+        next: d.next_episode_to_air ? {
+          s: d.next_episode_to_air.season_number, e: d.next_episode_to_air.episode_number, date: d.next_episode_to_air.air_date,
+        } : null,
+      } : null,
       watch: {
         link: providers.link || '',
-        flatrate: dedupe([...(providers.flatrate || []), ...(providers.free || []), ...(providers.ads || [])]),
+        free: dedupe([...(providers.free || []), ...(providers.ads || [])]),
+        flatrate: dedupe(providers.flatrate || []),
         rent: dedupe(providers.rent || []),
         buy: dedupe(providers.buy || []),
       },
       recommendations: (d.recommendations?.results || []).filter((r) => r.poster_path).map((r) => normalize(r, type)),
     };
+  },
+
+  async season(tvId, n) {
+    const d = await api(`/tv/${tvId}/season/${n}`);
+    return (d.episodes || []).map((e) => ({
+      s: n,
+      e: e.episode_number,
+      name: e.name || `Épisode ${e.episode_number}`,
+      overview: e.overview || '',
+      still: e.still_path,
+      date: e.air_date,
+      runtime: e.runtime || 0,
+    }));
   },
 
   async genres(type) {

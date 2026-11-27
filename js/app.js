@@ -1,6 +1,7 @@
 // Point d'entrée : navigation par onglets et écrans Accueil / Recherche / Fiche / Ma liste / Réglages.
-import { settings, watchlist, onChange, live, resetAll } from './store.js';
-import { tmdb, img, PROVIDERS, GENRES, providerLink, TmdbError, clearCache } from './tmdb.js';
+import { settings, watchlist, tracking, onChange, live, resetAll } from './store.js';
+import { tmdb, img, PROVIDERS, GENRES, providerLink, isSubscribed, TmdbError, clearCache } from './tmdb.js';
+import { epKey, isAired, progress, nextToWatch, seriesState, epLabel, formatDate } from './series.js';
 import { icons, esc, toast, openSheet, closeAllSheets, onVisible, haptic } from './ui.js';
 import { renderLive } from './live.js';
 
@@ -51,15 +52,15 @@ document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', (e)
 // ---- Composants ------------------------------------------------------------
 const typeLabel = (t) => (t === 'tv' ? 'Série' : 'Film');
 
-function posterCard(item, { wide = false } = {}) {
+function posterCard(item, { wide = false, sub = '', focus = '' } = {}) {
   const pic = wide ? img(item.backdrop, 'w780') : img(item.poster, 'w342');
   const inList = watchlist.has(item.type, item.id);
-  return `<button class="card ${wide ? 'card-wide' : ''}" data-type="${item.type}" data-id="${item.id}" aria-label="${esc(item.title)}">
+  return `<button class="card ${wide ? 'card-wide' : ''}" data-type="${item.type}" data-id="${item.id}" ${focus ? `data-focus="${focus}"` : ''} aria-label="${esc(item.title)}">
     <div class="card-img">${pic ? `<img src="${pic}" alt="" loading="lazy">` : `<div class="card-ph">${icons.film}<span>${esc(item.title)}</span></div>`}
       ${inList ? `<span class="card-badge">${icons.check}</span>` : ''}
       ${wide ? `<span class="card-wide-title">${esc(item.title)}</span>` : ''}
     </div>
-    ${wide ? '' : `<div class="card-title">${esc(item.title)}</div><div class="card-sub">${typeLabel(item.type)}${item.year ? ' · ' + item.year : ''}</div>`}
+    ${wide ? '' : `<div class="card-title">${esc(item.title)}</div><div class="card-sub">${sub ? esc(sub) : typeLabel(item.type) + (item.year ? ' · ' + item.year : '')}</div>`}
   </button>`;
 }
 
@@ -72,7 +73,7 @@ document.addEventListener('click', (e) => {
   const card = e.target.closest('.card[data-id]');
   if (!card) return;
   haptic();
-  openDetail(card.dataset.type, +card.dataset.id);
+  openDetail(card.dataset.type, +card.dataset.id, { focus: card.dataset.focus });
 });
 
 function errorBox(err) {
@@ -109,10 +110,14 @@ function renderHome(v) {
     return;
   }
 
+  const subs = settings.subscriptions;
+  const orderedProviders = [...PROVIDERS.filter((p) => subs.includes(p.id)), ...PROVIDERS.filter((p) => !subs.includes(p.id))];
   const rows = [
+    { title: 'À regarder gratuitement', badge: 'free', more: '#/recherche/free', load: () => tmdb.discover('all', { access: 'free' }).then((d) => d.results) },
+    ...(subs.length ? [{ title: 'Inclus dans tes abonnements', badge: 'mine', more: '#/recherche/mine', load: () => tmdb.discover('all', { providers: subs }).then((d) => d.results) }] : []),
     { title: 'Tendances de la semaine', load: () => tmdb.trending().then((r) => r.slice(6)) },
-    ...PROVIDERS.slice(0, 6).map((p) => ({
-      title: `À l’affiche sur ${p.name}`, provider: p,
+    ...orderedProviders.map((p) => ({
+      title: subs.includes(p.id) ? `Dans ton abonnement ${p.name}` : `À l’affiche sur ${p.name}`, provider: p, more: `#/recherche/p${p.id}`,
       load: () => tmdb.discover('all', { providers: [p.id] }).then((d) => d.results),
     })),
     { title: 'Films populaires', load: () => tmdb.discover('movie').then((d) => d.results) },
@@ -126,9 +131,12 @@ function renderHome(v) {
   v.innerHTML = `<section class="page home">
     <div class="hero" id="hero"><div class="hero-track" id="heroTrack"><div class="hero-slide skeleton"></div></div><div class="hero-dots" id="heroDots"></div></div>
     <h1 class="large-title home-title">Accueil</h1>
+    <section class="row" id="upNextRow" hidden>
+      <header class="row-head"><h2>${accessBadge('next')}À suivre</h2><a class="row-more" href="#/liste/series">Mes séries ${icons.chevronRight}</a></header>
+      <div class="row-scroll"></div></section>
     ${rows.map((r, i) => `<section class="row" data-row="${i}">
-      <header class="row-head"><h2>${r.provider ? providerBadge(r.provider) : ''}${esc(r.title)}</h2>
-      ${r.provider ? `<a class="row-more" href="#/recherche/p${r.provider.id}">Tout voir ${icons.chevronRight}</a>` : ''}</header>
+      <header class="row-head"><h2>${r.provider ? providerBadge(r.provider) : r.badge ? accessBadge(r.badge) : ''}${esc(r.title)}</h2>
+      ${r.more ? `<a class="row-more" href="${r.more}">Tout voir ${icons.chevronRight}</a>` : ''}</header>
       <div class="row-scroll">${skeletonRow(6, r.wide)}</div></section>`).join('')}
   </section>`;
 
@@ -166,7 +174,7 @@ function renderHome(v) {
 
   // Les rangées se chargent quand elles approchent de l'écran.
   const stops = [];
-  v.querySelectorAll('.row').forEach((rowEl) => {
+  v.querySelectorAll('.row[data-row]').forEach((rowEl) => {
     const r = rows[+rowEl.dataset.row];
     let done = false;
     stops.push(onVisible(rowEl, () => {
@@ -180,7 +188,39 @@ function renderHome(v) {
     }, '300px'));
   });
   ensureProviderLogos().then(() => v.querySelectorAll('[data-plogo]').forEach(fillLogo));
-  return () => stops.forEach((s) => s());
+
+  // « À suivre » : prochains épisodes des séries en cours
+  const drawUpNext = () => {
+    const row = v.querySelector('#upNextRow');
+    if (!row) return;
+    const items = Object.values(tracking.all())
+      .map((e) => ({ e, st: seriesState(e) }))
+      .filter((x) => x.st.kind === 'watching')
+      .sort((a, b) => b.e.updatedAt - a.e.updatedAt);
+    row.hidden = !items.length;
+    row.querySelector('.row-scroll').innerHTML = items.map(({ e, st }) =>
+      posterCard({ id: e.id, type: 'tv', title: e.title, poster: e.poster }, { sub: epLabel(st.next.s, st.next.e), focus: 'episodes' })).join('');
+  };
+  drawUpNext();
+  refreshTracked().then(drawUpNext);
+  const off = onChange((w) => w === 'tracking' && drawUpNext());
+  return () => { stops.forEach((s) => s()); off(); };
+}
+
+/** Badge carré coloré devant le titre d'une rangée. */
+function accessBadge(kind) {
+  const map = { free: ['#30d158', '0€'], mine: ['#0a84ff', icons.check], next: ['#bf5af2', icons.play] };
+  const [color, content] = map[kind];
+  return `<span class="pbadge abadge" style="--pc:${color}">${content}</span>`;
+}
+
+/** Rafraîchit en arrière-plan les infos de diffusion des séries suivies. */
+let lastRefresh = 0;
+function refreshTracked() {
+  if (!settings.apiKey || Date.now() - lastRefresh < 10 * 60 * 1000) return Promise.resolve();
+  lastRefresh = Date.now();
+  const ids = Object.values(tracking.all()).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 20).map((e) => e.id);
+  return Promise.allSettled(ids.map((id) => tmdb.details('tv', id).then((d) => tracking.refreshMeta(d.tvMeta))));
 }
 
 function providerBadge(p) {
@@ -197,14 +237,21 @@ async function ensureProviderLogos() {
 }
 
 // ---- Recherche -------------------------------------------------------------
-const searchState = { query: '', type: 'all', providers: [], genre: null };
+const searchState = { query: '', type: 'all', providers: [], genre: null, access: null };
 
 function renderSearch(v, params = []) {
   setTitle('Rechercher');
-  if (params[0]?.startsWith('p')) {
+  if (params[0] === 'free' || params[0] === 'mine') {
+    searchState.access = params[0];
+    searchState.providers = [];
+    searchState.query = '';
+  } else if (params[0]?.startsWith('p')) {
     searchState.providers = [+params[0].slice(1)];
+    searchState.access = null;
     searchState.query = '';
   }
+  const subs = settings.subscriptions;
+  if (searchState.access === 'mine' && !subs.length) searchState.access = 'free';
   if (!settings.apiKey) {
     v.innerHTML = `<section class="page"><h1 class="large-title">Rechercher</h1>${onboarding()}</section>`;
     return;
@@ -221,7 +268,9 @@ function renderSearch(v, params = []) {
       </div>
     </div>
     <div class="chips providers" id="provChips">
-      ${PROVIDERS.map((p) => `<button class="chip pchip ${searchState.providers.includes(p.id) ? 'active' : ''}" data-p="${p.id}">${providerBadge(p)}${esc(p.name)}</button>`).join('')}
+      <button class="chip pchip" data-access="free">${accessBadge('free')}Gratuit</button>
+      ${subs.length ? `<button class="chip pchip" data-access="mine">${accessBadge('mine')}Je peux regarder</button>` : ''}
+      ${PROVIDERS.map((p) => `<button class="chip pchip" data-p="${p.id}">${providerBadge(p)}${esc(p.name)}${subs.includes(p.id) ? ' <span class="mine-dot"></span>' : ''}</button>`).join('')}
     </div>
     <div class="chips" id="genreChips">
       ${GENRES.map((g) => `<button class="chip ${searchState.genre === g.id ? 'active' : ''}" data-g="${g.id}">${esc(g.name)}</button>`).join('')}
@@ -238,17 +287,22 @@ function renderSearch(v, params = []) {
   let loading = false;
   let token = 0;
 
-  const filtersActive = () => searchState.providers.length || searchState.genre;
+  const filtersActive = () => searchState.providers.length || searchState.genre || searchState.access;
+  const syncChips = () => {
+    $('#provChips').querySelectorAll('.chip').forEach((c) => c.classList.toggle('active',
+      c.dataset.access ? searchState.access === c.dataset.access : searchState.providers.includes(+c.dataset.p)));
+  };
+  syncChips();
 
   const fetchPage = (p) => {
-    const { query, type, providers, genre } = searchState;
+    const { query, type, providers, genre, access } = searchState;
     if (query) {
       return tmdb.search(query, p).then((d) => ({
         totalPages: d.totalPages,
         results: d.results.filter((i) => (type === 'all' || i.type === type) && (!genre || i.genreIds.includes(genre))),
       }));
     }
-    return tmdb.discover(type, { providers, genre, page: p });
+    return tmdb.discover(type, { providers, genre, page: p, access });
   };
 
   const load = async (reset) => {
@@ -278,8 +332,11 @@ function renderSearch(v, params = []) {
 
   const updateHint = () => {
     const p = searchState.providers.map((id) => PROVIDERS.find((x) => x.id === id)?.name).filter(Boolean);
+    const subNames = PROVIDERS.filter((x) => subs.includes(x.id)).map((x) => x.name);
     let hint = '';
-    if (searchState.query && p.length) hint = 'Le filtre par plateforme s’applique quand la recherche est vide.';
+    if (searchState.query && (p.length || searchState.access)) hint = 'Les filtres Gratuit et plateformes s’appliquent quand la recherche est vide.';
+    else if (searchState.access === 'free') hint = `Gratuit en ${regionName()}, avec ou sans publicité`;
+    else if (searchState.access === 'mine') hint = `Gratuit ou inclus dans ${subNames.length > 1 ? 'tes abonnements' : 'ton abonnement'} ${subNames.join(', ')}`;
     else if (!searchState.query && p.length) hint = `Disponible en streaming sur ${p.join(', ')}`;
     else if (!searchState.query && !filtersActive()) hint = 'Les plus populaires du moment';
     $('#hint').textContent = hint;
@@ -304,9 +361,15 @@ function renderSearch(v, params = []) {
   $('#provChips').addEventListener('click', (e) => {
     const b = e.target.closest('.chip');
     if (!b) return;
-    const id = +b.dataset.p;
-    searchState.providers = searchState.providers.includes(id) ? searchState.providers.filter((x) => x !== id) : [...searchState.providers, id];
-    b.classList.toggle('active');
+    if (b.dataset.access) {
+      searchState.access = searchState.access === b.dataset.access ? null : b.dataset.access;
+      searchState.providers = [];
+    } else {
+      const id = +b.dataset.p;
+      searchState.providers = searchState.providers.includes(id) ? searchState.providers.filter((x) => x !== id) : [...searchState.providers, id];
+      searchState.access = null;
+    }
+    syncChips();
     haptic();
     refresh();
   });
@@ -326,7 +389,7 @@ function renderSearch(v, params = []) {
 }
 
 // ---- Fiche détaillée -------------------------------------------------------
-async function openDetail(type, id) {
+async function openDetail(type, id, { focus } = {}) {
   const sheet = openSheet({
     className: 'sheet-detail',
     content: `<div class="detail-loading"><div class="spinner"></div></div>`,
@@ -347,14 +410,15 @@ async function openDetail(type, id) {
     type === 'tv' && d.seasons ? `${d.seasons} saison${d.seasons > 1 ? 's' : ''}` : '',
   ].filter(Boolean).join(' · ');
 
-  const stream = d.watch.flatrate;
-  const firstStream = stream[0];
-  const watchHref = (p) => providerLink(p.provider_id, d.title, d.watch.link || `https://www.themoviedb.org/${type}/${id}/watch`);
+  const w = d.watch;
+  const watchHref = (p) => providerLink(p.provider_id, d.title, w.link || `https://www.themoviedb.org/${type}/${id}/watch`);
+  const access = accessInfo(w);
 
-  const providerList = (label, list) => list.length ? `
+  const providerList = (label, list, { mark = false } = {}) => list.length ? `
     <div class="avail-group"><div class="avail-label">${label}</div><div class="avail-list">
-      ${list.map((p) => `<a class="avail" href="${esc(watchHref(p))}" target="_blank" rel="noopener">
-        <img src="${img(p.logo_path, 'w154')}" alt=""><span>${esc(p.provider_name)}</span></a>`).join('')}
+      ${list.map((p) => `<a class="avail ${mark && isSubscribed(p.provider_id) ? 'mine' : ''}" href="${esc(watchHref(p))}" target="_blank" rel="noopener">
+        <img src="${img(p.logo_path, 'w154')}" alt=""><span>${esc(p.provider_name)}</span>
+        ${mark && isSubscribed(p.provider_id) ? `<span class="mine-tag">${icons.check}</span>` : ''}</a>`).join('')}
     </div></div>` : '';
 
   sheet.el.innerHTML = `
@@ -372,7 +436,8 @@ async function openDetail(type, id) {
       </div>
     </div>
     <div class="detail-actions">
-      ${firstStream ? `<a class="btn primary big" href="${esc(watchHref(firstStream))}" target="_blank" rel="noopener">${icons.play} Regarder sur ${esc(firstStream.provider_name)}</a>`
+      <div class="access-pill ${access.kind}">${access.icon}<span>${esc(access.label)}</span></div>
+      ${access.p ? `<a class="btn primary big ${access.kind === 'free' ? 'free' : ''}" href="${esc(watchHref(access.p))}" target="_blank" rel="noopener">${icons.play} ${esc(access.cta)}</a>`
         : `<button class="btn primary big" data-scroll-avail>${icons.eye} Où regarder</button>`}
       <div class="detail-actions-row">
         <button class="btn glass" id="listBtn"></button>
@@ -384,10 +449,11 @@ async function openDetail(type, id) {
       ${d.director ? `<p class="muted small">${type === 'tv' ? 'Création' : 'Réalisation'} : ${esc(d.director)}</p>` : ''}</section>` : ''}
     <section class="detail-section" id="avail">
       <h3>Disponible sur</h3>
-      ${providerList('Abonnement', d.watch.flatrate)}${providerList('Location', d.watch.rent)}${providerList('Achat', d.watch.buy)}
-      ${!stream.length && !d.watch.rent.length && !d.watch.buy.length ? `<p class="muted">Ce titre n’est disponible sur aucune plateforme en ${regionName()} pour le moment.</p>` : ''}
+      ${providerList('Gratuit', w.free)}${providerList('Abonnement', w.flatrate, { mark: true })}${providerList('Location', w.rent)}${providerList('Achat', w.buy)}
+      ${access.kind === 'none' ? `<p class="muted">Ce titre n’est disponible sur aucune plateforme en ${regionName()} pour le moment.</p>` : ''}
       <p class="muted tiny">Disponibilités fournies par JustWatch via TMDB.</p>
     </section>
+    ${d.tvMeta?.seasons.length ? '<section class="detail-section" id="episodes"></section>' : ''}
     ${d.cast.length ? `<section class="detail-section"><h3>Distribution</h3><div class="row-scroll cast">
       ${d.cast.map((c) => `<div class="person"><div class="person-img">${c.photo ? `<img src="${img(c.photo, 'w185')}" alt="" loading="lazy">` : `<span>${esc(c.name[0] || '')}</span>`}</div>
         <div class="person-name">${esc(c.name)}</div><div class="person-role">${esc(c.role || '')}</div></div>`).join('')}
@@ -422,6 +488,148 @@ async function openDetail(type, id) {
   sheet.el.querySelector('[data-scroll-avail]')?.addEventListener('click', () => {
     sheet.el.querySelector('#avail').scrollIntoView({ behavior: 'smooth' });
   });
+
+  const epBox = sheet.el.querySelector('#episodes');
+  if (epBox) {
+    renderEpisodes(epBox, d.tvMeta);
+    if (focus === 'episodes') setTimeout(() => epBox.scrollIntoView({ behavior: 'smooth', block: 'start' }), 350);
+  }
+}
+
+/** Ce que l'utilisateur peut faire pour regarder : gratuit, inclus, abonnement requis, payant. */
+function accessInfo(w) {
+  const mine = w.flatrate.filter((p) => isSubscribed(p.provider_id));
+  if (w.free.length) {
+    const p = w.free[0];
+    return { kind: 'free', p, icon: accessBadge('free'), label: `Gratuit sur ${p.provider_name}`, cta: `Regarder gratuitement sur ${p.provider_name}` };
+  }
+  if (mine.length) {
+    const p = mine[0];
+    return { kind: 'mine', p, icon: icons.check, label: `Inclus dans ton abonnement ${p.provider_name}`, cta: `Regarder sur ${p.provider_name}` };
+  }
+  if (w.flatrate.length) {
+    const names = w.flatrate.slice(0, 3).map((p) => p.provider_name).join(', ');
+    return { kind: 'sub', p: w.flatrate[0], icon: icons.key, label: `Abonnement requis : ${names}`, cta: `Voir sur ${w.flatrate[0].provider_name}` };
+  }
+  if (w.rent.length || w.buy.length) return { kind: 'paid', icon: icons.key, label: 'Payant : location ou achat uniquement' };
+  return { kind: 'none', icon: icons.eye, label: `Pas disponible en streaming en ${regionName()}` };
+}
+
+// ---- Suivi des épisodes ------------------------------------------------------
+function renderEpisodes(box, meta) {
+  tracking.refreshMeta(meta);
+  const entry = () => tracking.get(meta.id) || { ...meta, watched: [] };
+  let season = nextToWatch(entry())?.s || meta.seasons[0].n;
+  let episodes = [];
+
+  box.innerHTML = `<h3>Épisodes</h3>
+    <div class="track-card" id="trackCard"></div>
+    <div class="chips seasons" id="seasonChips">${meta.seasons.map((x) =>
+      `<button class="chip" data-s="${x.n}">Saison ${x.n}</button>`).join('')}</div>
+    <div class="season-bar"><span id="seasonCount" class="muted small"></span><button class="link-btn" id="seasonAll"></button></div>
+    <ul class="episodes" id="epList"></ul>`;
+  const $ = (q) => box.querySelector(q);
+
+  const drawCard = () => {
+    const e = entry();
+    const tracked = !!tracking.get(meta.id);
+    const st = seriesState(e);
+    const pct = Math.round(st.pct * 100);
+    let main;
+    if (!tracked) main = `<div class="tc-title">Suis ta progression</div><div class="tc-sub">Coche les épisodes que tu as vus pour retrouver le prochain à regarder.</div>`;
+    else if (st.kind === 'watching') main = `<div class="tc-label">À SUIVRE</div><div class="tc-title">${epLabel(st.next.s, st.next.e)}</div>`;
+    else if (st.kind === 'uptodate') main = `<div class="tc-label ok">À JOUR</div><div class="tc-title">Tu as tout vu</div>`;
+    else main = `<div class="tc-label ok">TERMINÉE</div><div class="tc-title">Série terminée ✓</div>`;
+    const nextAir = meta.next?.date ? `<div class="tc-air">${icons.sparkles} Nouvel épisode le ${esc(formatDate(meta.next.date))} (${epLabel(meta.next.s, meta.next.e)})</div>` : '';
+    $('#trackCard').innerHTML = `
+      <div class="tc-main"><div>${main}</div>
+        ${tracked && st.kind === 'watching' ? `<button class="btn primary" id="markNext">${icons.check} Vu</button>` : ''}</div>
+      ${tracked ? `<div class="progress"><i style="width:${pct}%"></i></div>
+        <div class="tc-foot"><span>${st.watched} / ${st.total} épisodes vus</span><button class="link-btn danger" id="untrack">Ne plus suivre</button></div>` : ''}
+      ${nextAir}`;
+    $('#markNext')?.addEventListener('click', () => {
+      const n = st.next;
+      tracking.setWatched(meta, [epKey(n.s, n.e)], true);
+      haptic();
+      toast(`${epLabel(n.s, n.e)} marqué comme vu`);
+      if (n.s !== season) { season = n.s; loadSeason(); } else drawList();
+      drawCard();
+    });
+    $('#untrack')?.addEventListener('click', () => {
+      if (!confirm('Ne plus suivre cette série ? Ta progression sera effacée.')) return;
+      tracking.remove(meta.id);
+      drawCard();
+      drawList();
+    });
+  };
+
+  const drawList = () => {
+    const seen = new Set(entry().watched);
+    const aired = episodes.filter((x) => isAired(meta, x.s, x.e));
+    const allSeen = aired.length && aired.every((x) => seen.has(epKey(x.s, x.e)));
+    const nSeen = aired.filter((x) => seen.has(epKey(x.s, x.e))).length;
+    $('#seasonCount').textContent = episodes.length ? `${nSeen} / ${aired.length} vus${aired.length < episodes.length ? ` · ${episodes.length - aired.length} à venir` : ''}` : '';
+    $('#seasonAll').textContent = allSeen ? 'Tout décocher' : 'Tout marquer comme vu';
+    $('#seasonAll').hidden = !aired.length;
+    $('#epList').innerHTML = episodes.map((x) => {
+      const on = seen.has(epKey(x.s, x.e));
+      const aired = isAired(meta, x.s, x.e);
+      const sub = [x.date ? formatDate(x.date, { day: 'numeric', month: 'short' }) : '', x.runtime ? `${x.runtime} min` : ''].filter(Boolean).join(' · ');
+      return `<li class="ep ${on ? 'seen' : ''} ${aired ? '' : 'future'}">
+        <div class="ep-img">${x.still ? `<img src="${img(x.still, 'w300')}" alt="" loading="lazy">` : `<span>${x.e}</span>`}</div>
+        <div class="ep-text">
+          <div class="ep-title">${x.e}. ${esc(x.name)}</div>
+          <div class="ep-meta">${aired ? esc(sub) : `Diffusion ${x.date ? 'le ' + esc(formatDate(x.date)) : 'à venir'}`}</div>
+          ${x.overview ? `<p class="ep-overview">${esc(x.overview)}</p>` : ''}
+        </div>
+        <button class="ep-check" data-e="${x.e}" ${aired ? '' : 'disabled'} aria-pressed="${on}" aria-label="${on ? 'Marquer comme non vu' : 'Marquer comme vu'}">${icons.check}</button>
+      </li>`;
+    }).join('');
+  };
+
+  const loadSeason = async () => {
+    box.querySelectorAll('#seasonChips .chip').forEach((c) => c.classList.toggle('active', +c.dataset.s === season));
+    box.querySelector(`#seasonChips .chip[data-s="${season}"]`)?.scrollIntoView({ inline: 'center', block: 'nearest' });
+    $('#epList').innerHTML = '<li class="ep-loading"><div class="spinner"></div></li>';
+    const want = season;
+    try {
+      const list = await tmdb.season(meta.id, want);
+      if (want !== season) return;
+      episodes = list;
+      drawList();
+    } catch {
+      $('#epList').innerHTML = '<li class="muted small">Impossible de charger les épisodes.</li>';
+    }
+  };
+
+  $('#seasonChips').addEventListener('click', (e) => {
+    const c = e.target.closest('.chip');
+    if (!c) return;
+    season = +c.dataset.s;
+    loadSeason();
+  });
+  $('#epList').addEventListener('click', (e) => {
+    const b = e.target.closest('.ep-check');
+    if (!b || b.disabled) return;
+    const key = epKey(season, +b.dataset.e);
+    tracking.setWatched(meta, [key], !entry().watched.includes(key));
+    haptic();
+    drawList();
+    drawCard();
+  });
+  $('#seasonAll').addEventListener('click', () => {
+    const aired = episodes.filter((x) => isAired(meta, x.s, x.e)).map((x) => epKey(x.s, x.e));
+    const seen = new Set(entry().watched);
+    const allSeen = aired.every((k) => seen.has(k));
+    tracking.setWatched(meta, aired, !allSeen);
+    haptic();
+    toast(allSeen ? `Saison ${season} décochée` : `Saison ${season} marquée comme vue`);
+    drawList();
+    drawCard();
+  });
+
+  drawCard();
+  loadSeason();
 }
 
 function openTrailer(key) {
@@ -443,24 +651,33 @@ const regionName = () => REGIONS[settings.region] || settings.region;
 
 // ---- Ma liste --------------------------------------------------------------
 let listTab = 'towatch';
-function renderWatchlist(v) {
+function renderWatchlist(v, params = []) {
   setTitle('Ma liste');
+  if (params[0] === 'series') listTab = 'series';
   const draw = () => {
     const all = watchlist.all();
-    const items = all.filter((i) => (listTab === 'watched' ? i.watched : !i.watched));
     const nTo = all.filter((i) => !i.watched).length;
     const nSeen = all.length - nTo;
+    const series = Object.values(tracking.all());
+    const nSeries = series.filter((e) => seriesState(e).kind === 'watching').length;
+    let body;
+    if (listTab === 'series') body = seriesList(series);
+    else {
+      const items = all.filter((i) => (listTab === 'watched' ? i.watched : !i.watched));
+      body = items.length ? `<div class="grid">${items.map((i) => posterCard(i)).join('')}</div>` : `
+        <div class="empty"><div class="empty-icon">${icons.bookmark}</div>
+        <h3>${listTab === 'watched' ? 'Rien de vu pour l’instant' : 'Ta liste est vide'}</h3>
+        <p>${listTab === 'watched' ? 'Dans une fiche, appuie sur « Marquer comme vu ».' : 'Ajoute des films et des séries avec le bouton « + Ma liste ».'}</p>
+        ${listTab === 'towatch' ? '<a class="btn primary" href="#/recherche">Explorer le catalogue</a>' : ''}</div>`;
+    }
     v.innerHTML = `<section class="page">
       <h1 class="large-title">Ma liste</h1>
       <div class="segmented wide" id="listSeg">
         <button data-k="towatch" class="${listTab === 'towatch' ? 'on' : ''}">À voir${nTo ? ` (${nTo})` : ''}</button>
+        <button data-k="series" class="${listTab === 'series' ? 'on' : ''}">Séries${nSeries ? ` (${nSeries})` : ''}</button>
         <button data-k="watched" class="${listTab === 'watched' ? 'on' : ''}">Déjà vus${nSeen ? ` (${nSeen})` : ''}</button>
       </div>
-      ${items.length ? `<div class="grid">${items.map((i) => posterCard(i)).join('')}</div>` : `
-        <div class="empty"><div class="empty-icon">${icons.bookmark}</div>
-        <h3>${listTab === 'watched' ? 'Rien de vu pour l’instant' : 'Votre liste est vide'}</h3>
-        <p>${listTab === 'watched' ? 'Dans une fiche, appuyez sur « Marquer comme vu ».' : 'Ajoutez des films et des séries avec le bouton « + Ma liste ».'}</p>
-        ${listTab === 'towatch' ? '<a class="btn primary" href="#/recherche">Explorer le catalogue</a>' : ''}</div>`}
+      ${body}
     </section>`;
     v.querySelector('#listSeg').addEventListener('click', (e) => {
       const b = e.target.closest('button');
@@ -470,7 +687,37 @@ function renderWatchlist(v) {
     });
   };
   draw();
-  return onChange((what) => what === 'watchlist' && draw());
+  refreshTracked().then(() => v.isConnected && listTab === 'series' && draw());
+  return onChange((what) => (what === 'watchlist' || what === 'tracking') && draw());
+}
+
+function seriesList(series) {
+  if (!series.length) {
+    return `<div class="empty"><div class="empty-icon">${icons.tv}</div><h3>Aucune série suivie</h3>
+      <p>Ouvre une série et coche les épisodes que tu as vus : tu retrouveras ici le prochain à regarder.</p>
+      <a class="btn primary" href="#/recherche">Trouver une série</a></div>`;
+  }
+  const order = { watching: 0, uptodate: 1, finished: 2 };
+  const rows = series.map((e) => ({ e, st: seriesState(e) }))
+    .sort((a, b) => order[a.st.kind] - order[b.st.kind] || b.e.updatedAt - a.e.updatedAt);
+  const section = (kind, title) => {
+    const list = rows.filter((r) => r.st.kind === kind);
+    if (!list.length) return '';
+    return `<div class="group-title list-group-title">${title}</div><div class="series-list">${list.map(({ e, st }) => {
+      let line;
+      if (st.kind === 'watching') line = `<span class="sr-next">À suivre : ${epLabel(st.next.s, st.next.e)}</span>`;
+      else if (e.next?.date) line = `<span class="sr-air">Nouvel épisode le ${esc(formatDate(e.next.date))}</span>`;
+      else line = '<span class="sr-done">Série terminée</span>';
+      return `<button class="card series-row" data-type="tv" data-id="${e.id}" data-focus="episodes">
+        <div class="sr-poster">${e.poster ? `<img src="${img(e.poster, 'w185')}" alt="" loading="lazy">` : icons.tv}</div>
+        <div class="sr-text"><div class="sr-title">${esc(e.title)}</div>${line}
+          <div class="progress"><i style="width:${Math.round(st.pct * 100)}%"></i></div>
+          <div class="sr-count">${st.watched} / ${st.total} épisodes</div></div>
+        <span class="sr-chev">${icons.chevronRight}</span>
+      </button>`;
+    }).join('')}</div>`;
+  };
+  return section('watching', 'En cours') + section('uptodate', 'À jour : en attente de nouveaux épisodes') + section('finished', 'Terminées');
 }
 
 // Met à jour les pastilles ✓ des affiches quand la liste change.
@@ -487,8 +734,10 @@ onChange((what) => {
 // ---- Réglages --------------------------------------------------------------
 function openSettings() {
   const customs = live.playlists().filter((p) => !p.builtin);
+  let subsChanged = false;
   const sheet = openSheet({
     className: 'sheet-settings',
+    onClose: () => { if (subsChanged) setTimeout(route, 0); },
     content: `
       <h2 class="sheet-title">Réglages</h2>
       <div class="group-title">Catalogue (TMDB)</div>
@@ -500,6 +749,12 @@ function openSettings() {
           <button class="btn glass" id="showKey">${icons.eye} Afficher</button>
         </div>
         <p class="muted small" id="keyStatus">Gratuite : <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">themoviedb.org → Paramètres → API</a>. Elle reste uniquement sur cet appareil.</p>
+      </div>
+      <div class="group-title">Mes abonnements</div>
+      <div class="group subs-group">
+        ${PROVIDERS.map((p) => `<label class="switch-row">${providerBadge(p)}<span class="sw-name">${esc(p.name)}</span>
+          <input type="checkbox" class="switch" data-sub="${p.id}" ${settings.subscriptions.includes(p.id) ? 'checked' : ''}></label>`).join('')}
+        <p class="muted small">Coche ce que tu as : l’appli mettra en avant ce que tu peux regarder sans payer en plus. Aucun abonnement ? Laisse tout décoché, tu verras le gratuit.</p>
       </div>
       <div class="group-title">Pays</div>
       <div class="group">
@@ -539,6 +794,12 @@ function openSettings() {
       status.innerHTML = `<span class="ko">${esc(err.code === 'BAD_KEY' ? 'Clé refusée par TMDB. Vérifiez-la.' : err.message)}</span>`;
     }
   });
+  sheet.el.querySelectorAll('[data-sub]').forEach((c) => c.addEventListener('change', () => {
+    settings.subscriptions = [...sheet.el.querySelectorAll('[data-sub]:checked')].map((x) => +x.dataset.sub);
+    subsChanged = true;
+    haptic();
+  }));
+  ensureProviderLogos().then(() => sheet.el.querySelectorAll('[data-plogo]').forEach(fillLogo));
   $('#region').addEventListener('change', (e) => {
     settings.region = e.target.value;
     clearCache();
