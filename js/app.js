@@ -1,9 +1,9 @@
 // Point d'entrée : navigation par onglets et écrans Accueil / Recherche / Fiche / Ma liste / Réglages.
-import { settings, watchlist, tracking, onChange, live, resetAll } from './store.js?v=3';
-import { tmdb, img, PROVIDERS, GENRES, providerLink, isSubscribed, TmdbError, clearCache } from './tmdb.js?v=3';
-import { epKey, isAired, progress, nextToWatch, seriesState, epLabel, formatDate } from './series.js?v=3';
-import { icons, esc, toast, openSheet, closeAllSheets, onVisible, haptic } from './ui.js?v=3';
-import { renderLive } from './live.js?v=3';
+import { settings, watchlist, tracking, onChange, live, resetAll } from './store.js?v=4';
+import { tmdb, img, PROVIDERS, GENRES, providerLink, isSubscribed, TmdbError, clearCache } from './tmdb.js?v=4';
+import { epKey, isAired, progress, nextToWatch, seriesState, epLabel, formatDate } from './series.js?v=4';
+import { icons, esc, toast, openSheet, closeAllSheets, onVisible, haptic } from './ui.js?v=4';
+import { renderLive } from './live.js?v=4';
 
 const view = document.getElementById('view');
 const navbar = document.getElementById('navbar');
@@ -131,6 +131,8 @@ function renderHome(v) {
   v.innerHTML = `<section class="page home">
     <div class="hero" id="hero"><div class="hero-track" id="heroTrack"><div class="hero-slide skeleton"></div></div><div class="hero-dots" id="heroDots"></div></div>
     <h1 class="large-title home-title">Accueil</h1>
+    ${subs.length ? '' : `<button class="subs-cta" data-open-settings>
+      ${accessBadge('mine')}<span class="subs-cta-text"><b>Tu as des abonnements ?</b><small>Netflix, Disney+, Canal+… Indique-les pour voir ce qui est inclus.</small></span>${icons.chevronRight}</button>`}
     <section class="row" id="upNextRow" hidden>
       <header class="row-head"><h2>${accessBadge('next')}À suivre</h2><a class="row-more" href="#/liste/series">Mes séries ${icons.chevronRight}</a></header>
       <div class="row-scroll"></div></section>
@@ -735,11 +737,7 @@ onChange((what) => {
 function openSettings() {
   const customs = live.playlists().filter((p) => !p.builtin);
   let subsChanged = false;
-  const sheet = openSheet({
-    className: 'sheet-settings',
-    onClose: () => { if (subsChanged) setTimeout(route, 0); },
-    content: `
-      <h2 class="sheet-title">Réglages</h2>
+  const keyBlock = `
       <div class="group-title">Catalogue (TMDB)</div>
       <div class="group">
         <label class="field"><span>Clé ou jeton d’accès TMDB</span>
@@ -749,13 +747,20 @@ function openSettings() {
           <button class="btn glass" id="showKey">${icons.eye} Afficher</button>
         </div>
         <p class="muted small" id="keyStatus">Gratuite : <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">themoviedb.org → Paramètres → API</a>. Elle reste uniquement sur cet appareil.</p>
-      </div>
+      </div>`;
+  const subsBlock = `
       <div class="group-title">Mes abonnements</div>
       <div class="group subs-group">
         ${PROVIDERS.map((p) => `<label class="switch-row">${providerBadge(p)}<span class="sw-name">${esc(p.name)}</span>
           <input type="checkbox" class="switch" data-sub="${p.id}" ${settings.subscriptions.includes(p.id) ? 'checked' : ''}></label>`).join('')}
         <p class="muted small">Coche ce que tu as : l’appli mettra en avant ce que tu peux regarder sans payer en plus. Aucun abonnement ? Laisse tout décoché, tu verras le gratuit.</p>
-      </div>
+      </div>`;
+  const sheet = openSheet({
+    className: 'sheet-settings',
+    onClose: () => { if (subsChanged) setTimeout(route, 0); },
+    content: `
+      <h2 class="sheet-title">Réglages</h2>
+      ${settings.apiKey ? subsBlock + keyBlock : keyBlock + subsBlock}
       <div class="group-title">Pays</div>
       <div class="group">
         <label class="field"><span>Disponibilités des plateformes pour</span>
