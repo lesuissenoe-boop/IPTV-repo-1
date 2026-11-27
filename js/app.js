@@ -1,9 +1,9 @@
 // Point d'entrée : navigation par onglets et écrans Accueil / Recherche / Fiche / Ma liste / Réglages.
-import { settings, watchlist, tracking, onChange, live, resetAll } from './store.js';
-import { tmdb, img, PROVIDERS, GENRES, providerLink, isSubscribed, TmdbError, clearCache } from './tmdb.js';
-import { epKey, isAired, progress, nextToWatch, seriesState, epLabel, formatDate } from './series.js';
-import { icons, esc, toast, openSheet, closeAllSheets, onVisible, haptic } from './ui.js';
-import { renderLive } from './live.js';
+import { settings, watchlist, tracking, onChange, live, resetAll } from './store.js?v=3';
+import { tmdb, img, PROVIDERS, GENRES, providerLink, isSubscribed, TmdbError, clearCache } from './tmdb.js?v=3';
+import { epKey, isAired, progress, nextToWatch, seriesState, epLabel, formatDate } from './series.js?v=3';
+import { icons, esc, toast, openSheet, closeAllSheets, onVisible, haptic } from './ui.js?v=3';
+import { renderLive } from './live.js?v=3';
 
 const view = document.getElementById('view');
 const navbar = document.getElementById('navbar');
