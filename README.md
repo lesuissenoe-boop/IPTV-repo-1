@@ -8,6 +8,7 @@ Application web façon Apple (iPhone d'abord) qui réunit :
 - **La recherche** par titre, type, plateforme et genre.
 - **Ma liste** (watchlist) avec « À voir » / « Séries » / « Déjà vus ».
 - **Le suivi des séries** : épisodes à cocher par saison, progression, « À suivre » (prochain épisode), date du prochain épisode diffusé.
+- **Sauvegarde / Restauration** : un code à copier (par exemple dans Notes) qui contient la clé, la liste, les séries suivies, les abonnements et les favoris TV.
 - **La TV en direct** : lecteur IPTV pour listes M3U (chaînes gratuites iptv-org par défaut, ou vos propres listes), favoris et zapping.
 
 > Écran ne diffuse aucun contenu des plateformes de streaming. Utilisez uniquement des listes IPTV que vous avez le droit de regarder.

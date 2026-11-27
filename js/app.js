@@ -1,9 +1,9 @@
 // Point d'entrée : navigation par onglets et écrans Accueil / Recherche / Fiche / Ma liste / Réglages.
-import { settings, watchlist, tracking, onChange, live, resetAll } from './store.js?v=5';
-import { tmdb, img, PROVIDERS, GENRES, providerLink, isSubscribed, TmdbError, clearCache } from './tmdb.js?v=5';
-import { epKey, isAired, progress, nextToWatch, seriesState, epLabel, formatDate } from './series.js?v=5';
-import { icons, esc, toast, openSheet, closeAllSheets, onVisible, haptic } from './ui.js?v=5';
-import { renderLive } from './live.js?v=5';
+import { settings, watchlist, tracking, onChange, live, resetAll, exportData, readBackup, importData, lastBackup } from './store.js?v=6';
+import { tmdb, img, PROVIDERS, GENRES, providerLink, isSubscribed, TmdbError, clearCache } from './tmdb.js?v=6';
+import { epKey, isAired, progress, nextToWatch, seriesState, epLabel, formatDate } from './series.js?v=6';
+import { icons, esc, toast, openSheet, closeAllSheets, onVisible, haptic } from './ui.js?v=6';
+import { renderLive } from './live.js?v=6';
 
 const view = document.getElementById('view');
 const navbar = document.getElementById('navbar');
@@ -95,11 +95,13 @@ function onboarding(bad = false) {
       <li><span>Copiez le « Jeton d’accès en lecture » et collez-le ici</span></li>
     </ol>
     <button class="btn primary" data-open-settings>${icons.key} Ajouter ma clé</button>
+    <p><button class="link-btn" data-restore>J’ai une sauvegarde</button></p>
     <p class="muted small">La TV en direct fonctionne déjà sans clé.</p>
   </div>`;
 }
 document.addEventListener('click', (e) => {
   if (e.target.closest('[data-open-settings]')) openSettings();
+  if (e.target.closest('[data-restore]')) openRestore();
 });
 
 // ---- Accueil ---------------------------------------------------------------
@@ -761,6 +763,15 @@ function openSettings() {
     content: `
       <h2 class="sheet-title">Réglages</h2>
       ${settings.apiKey ? subsBlock + keyBlock : keyBlock + subsBlock}
+      <div class="group-title">Sauvegarde</div>
+      <div class="group">
+        <p class="small">Garde une copie de ta clé, de ta liste, de tes séries et de tes abonnements. Si l’appli les perd, recolle le code pour tout récupérer.</p>
+        <div class="field-row">
+          <button class="btn primary" id="backupBtn">Sauvegarder</button>
+          <button class="btn glass" id="restoreBtn">Restaurer</button>
+        </div>
+        <p class="muted small" id="backupInfo">${backupInfo()}</p>
+      </div>
       <div class="group-title">Pays</div>
       <div class="group">
         <label class="field"><span>Disponibilités des plateformes pour</span>
@@ -805,6 +816,11 @@ function openSettings() {
     haptic();
   }));
   ensureProviderLogos().then(() => sheet.el.querySelectorAll('[data-plogo]').forEach(fillLogo));
+  $('#backupBtn').addEventListener('click', () => {
+    openBackup();
+    $('#backupInfo').textContent = backupInfo();
+  });
+  $('#restoreBtn').addEventListener('click', openRestore);
   $('#region').addEventListener('change', (e) => {
     settings.region = e.target.value;
     clearCache();
@@ -822,6 +838,105 @@ function openSettings() {
     clearCache();
     sheet.close();
     route();
+  });
+}
+
+// ---- Sauvegarde ------------------------------------------------------------
+function backupInfo() {
+  const t = lastBackup();
+  if (!t) return 'Aucune sauvegarde pour l’instant.';
+  return `Dernière sauvegarde : ${new Date(t).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}`;
+}
+
+async function copyText(text, textarea) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // Ancienne méthode si le presse-papiers n'est pas accessible
+    textarea.focus();
+    textarea.select();
+    textarea.setSelectionRange(0, text.length);
+    try { return document.execCommand('copy'); } catch { return false; }
+  }
+}
+
+function openBackup() {
+  const code = exportData();
+  const sheet = openSheet({
+    className: 'sheet-small',
+    content: `
+      <h2 class="sheet-title">Ta sauvegarde</h2>
+      <p class="muted">Copie ce code et garde-le en lieu sûr, par exemple dans l’app Notes. Pour tout récupérer : Réglages → Sauvegarde → Restaurer.</p>
+      <div class="warn">${icons.key}<span>Ce code contient ta clé TMDB : ne le partage avec personne.</span></div>
+      <textarea class="code-box" id="codeBox" readonly rows="5">${esc(code)}</textarea>
+      <div class="field-row">
+        <button class="btn primary" id="copyCode">Copier le code</button>
+        ${navigator.share ? '<button class="btn glass" id="shareCode">Envoyer vers…</button>' : ''}
+      </div>`,
+  });
+  const box = sheet.el.querySelector('#codeBox');
+  sheet.el.querySelector('#copyCode').addEventListener('click', async () => {
+    const ok = await copyText(code, box);
+    haptic();
+    toast(ok ? 'Code copié ✓' : 'Sélectionne le code et copie-le');
+  });
+  sheet.el.querySelector('#shareCode')?.addEventListener('click', () => {
+    navigator.share({ title: 'Sauvegarde Écran', text: code }).catch(() => { /* annulé */ });
+  });
+}
+
+function openRestore() {
+  const sheet = openSheet({
+    className: 'sheet-small',
+    content: `
+      <h2 class="sheet-title">Restaurer</h2>
+      <p class="muted">Colle ici le code de ta sauvegarde (il commence par ECRAN1:).</p>
+      <textarea class="code-box" id="restoreBox" rows="5" placeholder="ECRAN1:…" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+      <p class="small" id="restorePreview"></p>
+      <div class="field-row">
+        ${navigator.clipboard?.readText ? '<button class="btn glass" id="pasteCode">Coller</button>' : ''}
+        <button class="btn primary" id="doRestore">Restaurer</button>
+      </div>`,
+  });
+  const $ = (q) => sheet.el.querySelector(q);
+  const preview = () => {
+    const v = $('#restoreBox').value.trim();
+    if (!v) { $('#restorePreview').textContent = ''; return null; }
+    try {
+      const p = readBackup(v);
+      const d = p.data;
+      const parts = [
+        d.apiKey ? 'ta clé TMDB' : '',
+        d.watchlist?.length ? `${d.watchlist.length} titre${d.watchlist.length > 1 ? 's' : ''} dans ta liste` : '',
+        d.tracking && Object.keys(d.tracking).length ? `${Object.keys(d.tracking).length} série${Object.keys(d.tracking).length > 1 ? 's' : ''} suivie${Object.keys(d.tracking).length > 1 ? 's' : ''}` : '',
+        d.subscriptions?.length ? `${d.subscriptions.length} abonnement${d.subscriptions.length > 1 ? 's' : ''}` : '',
+        d.liveFav?.length ? `${d.liveFav.length} chaîne${d.liveFav.length > 1 ? 's' : ''} favorite${d.liveFav.length > 1 ? 's' : ''}` : '',
+      ].filter(Boolean);
+      const date = p.date ? new Date(p.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : '';
+      $('#restorePreview').innerHTML = `<span class="ok">${icons.check} Sauvegarde${date ? ' du ' + esc(date) : ''} : ${esc(parts.join(', ') || 'aucune donnée')}</span>`;
+      return p;
+    } catch {
+      $('#restorePreview').innerHTML = '<span class="ko">Ce code n’est pas valide. Vérifie que tu l’as copié en entier.</span>';
+      return null;
+    }
+  };
+  $('#restoreBox').addEventListener('input', preview);
+  $('#pasteCode')?.addEventListener('click', async () => {
+    try {
+      $('#restoreBox').value = await navigator.clipboard.readText();
+      preview();
+    } catch { toast('Appuie longuement dans la case puis « Coller »'); }
+  });
+  $('#doRestore').addEventListener('click', () => {
+    if (!preview()) { toast('Colle d’abord un code valide'); return; }
+    importData($('#restoreBox').value);
+    clearCache();
+    providerLogos = {};
+    haptic();
+    toast('Tout est récupéré ✓');
+    sheet.close();
+    setTimeout(route, 350);
   });
 }
 

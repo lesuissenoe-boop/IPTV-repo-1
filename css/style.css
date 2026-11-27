@@ -588,3 +588,14 @@ body.sheet-open .tabbar { transform: translate(-50%, 140%); opacity: 0; }
 .subs-cta > svg { color: var(--text-2); }
 .subs-cta-text { flex: 1; display: grid; gap: 2px; }
 .subs-cta-text small { color: var(--text-2); font-size: 13.5px; }
+
+/* Sauvegarde */
+.code-box {
+  width: 100%; border: 0; outline: none; resize: none; border-radius: 12px; padding: 12px;
+  background: var(--fill-2); color: var(--text); font: 13px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+  word-break: break-all; margin: 4px 0 12px;
+}
+.code-box:focus { box-shadow: 0 0 0 2px var(--accent); }
+.warn { display: flex; gap: 10px; align-items: center; padding: 10px 12px; margin: 12px 0; border-radius: 12px; font-size: 14px; background: rgba(255,159,10,0.14); color: #ffb340; }
+#restorePreview { margin: 0 0 12px; min-height: 1em; }
+.onboarding .link-btn { margin-top: 4px; }

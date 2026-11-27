@@ -158,3 +158,45 @@ export function resetAll() {
   emit('settings');
   emit('watchlist');
 }
+
+// ---- Sauvegarde / restauration ---------------------------------------------
+// Le code contient tout ce qui est enregistré (sauf le contenu des listes TV importées depuis un fichier).
+const BACKUP_PREFIX = 'ECRAN1:';
+
+export function exportData() {
+  const data = {};
+  try {
+    Object.keys(localStorage)
+      .filter((k) => k.startsWith(PREFIX) && !k.startsWith(PREFIX + 'plcontent.') && k !== PREFIX + 'lastBackup')
+      .forEach((k) => { data[k.slice(PREFIX.length)] = JSON.parse(localStorage.getItem(k)); });
+  } catch { /* stockage indisponible */ }
+  const bytes = new TextEncoder().encode(JSON.stringify({ v: 1, date: new Date().toISOString(), data }));
+  let bin = '';
+  bytes.forEach((b) => { bin += String.fromCharCode(b); });
+  write('lastBackup', Date.now());
+  return BACKUP_PREFIX + btoa(bin);
+}
+
+/** Lit un code de sauvegarde sans rien modifier. Lève une erreur si le code est invalide. */
+export function readBackup(code) {
+  const clean = String(code || '').replace(/\s+/g, '');
+  if (!clean.startsWith(BACKUP_PREFIX)) throw new Error('FORMAT');
+  const bin = atob(clean.slice(BACKUP_PREFIX.length));
+  const json = new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+  const parsed = JSON.parse(json);
+  if (!parsed || typeof parsed.data !== 'object') throw new Error('FORMAT');
+  return parsed;
+}
+
+export function importData(code) {
+  const parsed = readBackup(code);
+  Object.entries(parsed.data).forEach(([k, v]) => write(k, v));
+  emit('settings');
+  emit('watchlist');
+  emit('tracking');
+  return parsed;
+}
+
+export function lastBackup() {
+  return read('lastBackup', null);
+}
