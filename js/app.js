@@ -1,9 +1,9 @@
 // Point d'entrée : navigation par onglets et écrans Accueil / Recherche / Fiche / Ma liste / Réglages.
-import { settings, watchlist, tracking, onChange, live, resetAll } from './store.js?v=4';
-import { tmdb, img, PROVIDERS, GENRES, providerLink, isSubscribed, TmdbError, clearCache } from './tmdb.js?v=4';
-import { epKey, isAired, progress, nextToWatch, seriesState, epLabel, formatDate } from './series.js?v=4';
-import { icons, esc, toast, openSheet, closeAllSheets, onVisible, haptic } from './ui.js?v=4';
-import { renderLive } from './live.js?v=4';
+import { settings, watchlist, tracking, onChange, live, resetAll } from './store.js?v=5';
+import { tmdb, img, PROVIDERS, GENRES, providerLink, isSubscribed, TmdbError, clearCache } from './tmdb.js?v=5';
+import { epKey, isAired, progress, nextToWatch, seriesState, epLabel, formatDate } from './series.js?v=5';
+import { icons, esc, toast, openSheet, closeAllSheets, onVisible, haptic } from './ui.js?v=5';
+import { renderLive } from './live.js?v=5';
 
 const view = document.getElementById('view');
 const navbar = document.getElementById('navbar');
@@ -824,5 +824,8 @@ function openSettings() {
     route();
   });
 }
+
+// Demande au téléphone de conserver durablement les données (clé, liste, séries).
+try { navigator.storage?.persist?.(); } catch { /* non pris en charge */ }
 
 route();

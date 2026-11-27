@@ -1,5 +1,5 @@
 // Accès au catalogue TMDB (The Movie Database) : films, séries et plateformes de diffusion.
-import { settings } from './store.js?v=4';
+import { settings } from './store.js?v=5';
 
 const BASE = 'https://api.themoviedb.org/3';
 

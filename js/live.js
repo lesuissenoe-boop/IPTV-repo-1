@@ -1,6 +1,6 @@
 // TV en direct : lecture des listes M3U et du lecteur vidéo (HLS).
-import { live } from './store.js?v=4';
-import { esc, icons, toast, onVisible, openSheet, haptic } from './ui.js?v=4';
+import { live } from './store.js?v=5';
+import { esc, icons, toast, onVisible, openSheet, haptic } from './ui.js?v=5';
 
 // ---- Analyse M3U ----------------------------------------------------------
 export function parseM3U(text) {
