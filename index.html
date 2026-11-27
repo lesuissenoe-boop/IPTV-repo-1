@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Écran</title>
+  <meta name="description" content="Tous vos films, séries et chaînes TV au même endroit.">
+  <meta name="theme-color" content="#000000">
+
+  <!-- Installation sur l'écran d'accueil iPhone -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Écran">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js" defer></script>
+  <script src="js/app.js" type="module"></script>
+</head>
+<body>
+  <!-- Barre de navigation compacte (apparaît au défilement) -->
+  <header id="navbar" class="navbar">
+    <span id="navTitle" class="navbar-title"></span>
+    <button id="settingsBtn" class="nav-btn" aria-label="Réglages"></button>
+  </header>
+
+  <main id="view" class="view" tabindex="-1"></main>
+
+  <!-- Barre d'onglets flottante façon iOS -->
+  <nav class="tabbar" aria-label="Navigation principale">
+    <a href="#/accueil" data-tab="accueil" class="tab"><span class="tab-icon" data-icon="home"></span><span>Accueil</span></a>
+    <a href="#/recherche" data-tab="recherche" class="tab"><span class="tab-icon" data-icon="search"></span><span>Rechercher</span></a>
+    <a href="#/direct" data-tab="direct" class="tab"><span class="tab-icon" data-icon="tv"></span><span>En direct</span></a>
+    <a href="#/liste" data-tab="liste" class="tab"><span class="tab-icon" data-icon="bookmark"></span><span>Ma liste</span></a>
+  </nav>
+
+  <!-- Feuilles modales (fiche, réglages, bande-annonce) -->
+  <div id="sheetRoot"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
